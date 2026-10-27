@@ -1,6 +1,6 @@
 name: Build Bara Salfa Yemen APK
 
-on:
+'on':
 workflow_dispatch:
 push:
 branches:
@@ -30,17 +30,19 @@ steps:
     run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
 
   - name: Extract Android project
+    shell: bash
     run: |
+      set -e
       mkdir -p android-project
-      ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)
+      ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)
       if [ -z "$ZIP_FILE" ]; then
-        echo "ERROR: Project ZIP not found in repository root"
+        echo "ERROR: No project ZIP found in repository root."
         exit 1
       fi
       unzip -q "$ZIP_FILE" -d android-project
       PROJECT_DIR=$(find android-project -type f -name settings.gradle -print -quit | xargs -r dirname)
       if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
-        echo "ERROR: Android project structure is invalid"
+        echo "ERROR: Android project structure was not found inside the ZIP."
         exit 1
       fi
       echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
