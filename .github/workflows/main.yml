@@ -2,7 +2,6 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
@@ -13,7 +12,7 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Extract Project ZIP (If uploaded as ZIP) & Prepare Files
+      - name: 2. Extract ZIP (If uploaded as ZIP) & Locate HTML
         run: |
           if ls *.zip 1> /dev/null 2>&1; then
             for z in *.zip; do
@@ -22,108 +21,59 @@ jobs:
           fi
           mkdir -p www
           if [ ! -f "www/index.html" ]; then
-            if [ -f "برا السالفة اليمنية.html" ]; then
-              cp "برا السالفة اليمنية.html" www/index.html
-            elif [ -f "index.html" ]; then
-              cp "index.html" www/index.html
+            HTML_FILE=$(find . -maxdepth 2 -name "*.html" ! -path "./www/*" ! -path "./node_modules/*" | head -n 1)
+            if [ -n "$HTML_FILE" ]; then
+              cp "$HTML_FILE" www/index.html
+            else
+              echo "Error: HTML file not found!" && exit 1
             fi
           fi
 
-      - name: 3. Setup Node.js
+      - name: 3. Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 4. Setup Java JDK 21
+      - name: 4. Setup Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
 
-      - name: 5. Install Dependencies & Add Android Platform
+      - name: 5. Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 6. Initialize Capacitor & Android Project
         run: |
-          if [ ! -f "package.json" ]; then
-            cat << 'EOF' > package.json
-          {
-            "name": "bara-alsalfa-yemeni",
-            "version": "1.0.0",
-            "description": "لعبة برا السالفة اليمنية",
-            "main": "www/index.html",
-            "dependencies": {
-              "@capacitor/android": "^6.1.2",
-              "@capacitor/cli": "^6.1.2",
-              "@capacitor/core": "^6.1.2"
-            },
-            "devDependencies": {
-              "@capacitor/assets": "^3.0.5"
-            }
-          }
-          EOF
-          fi
-          if [ ! -f "capacitor.config.json" ]; then
-            cat << 'EOF' > capacitor.config.json
-          {
-            "appId": "com.yaser.barasalfa",
-            "appName": "برا السالفة اليمنية",
-            "webDir": "www",
-            "bundledWebRuntime": false,
-            "backgroundColor": "#0a0a0a",
-            "android": {
-              "allowMixedContent": true
-            }
-          }
-          EOF
-          fi
+          echo '{"name":"bara-alsalfa-yemeni","version":"1.0.0","dependencies":{"@capacitor/android":"6.1.2","@capacitor/cli":"6.1.2","@capacitor/core":"6.1.2"}}' > package.json
+          echo '{"appId":"com.yaser.barasalfa","appName":"برا السالفة اليمنية","webDir":"www","backgroundColor":"#0a0a0a"}' > capacitor.config.json
           npm install
+          rm -rf android
           npx cap add android
-
-      - name: 6. Generate Android Icons & Splash Screen
-        run: |
-          if [ ! -f "assets/icon-only.png" ]; then
-            sudo apt-get update && sudo apt-get install -y imagemagick webp
-            mkdir -p assets
-            ICON_SRC=$(find . -maxdepth 1 \( -name "*.webp" -o -name "*.png" -o -name "*.jpg" \) | head -n 1)
-            convert "$ICON_SRC" -resize 1024x1024 assets/icon-only.png
-            cp assets/icon-only.png assets/icon-foreground.png
-            convert -size 1024x1024 xc:"#ffffff" assets/icon-background.png
-            convert -size 2732x2732 xc:"#0a0a0a" \( "$ICON_SRC" -resize 900x900 \) -gravity center -composite assets/splash.png
-            cp assets/splash.png assets/splash-dark.png
-          fi
-          npx @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#0a0a0a' --splashBackgroundColor '#0a0a0a' --splashBackgroundColorDark '#0a0a0a'
-
-      - name: 7. Configure Dark Status Bar & Sync Capacitor
-        run: |
           npx cap sync android
-          cat << 'EOF' > android/app/src/main/res/values/styles.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
-                  <item name="colorPrimary">#0a0a0a</item>
-                  <item name="colorPrimaryDark">#0a0a0a</item>
-                  <item name="colorAccent">#d97706</item>
-                  <item name="android:statusBarColor">#0a0a0a</item>
-                  <item name="android:navigationBarColor">#111113</item>
-                  <item name="android:windowLightStatusBar">false</item>
-              </style>
-              <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
-                  <item name="windowActionBar">false</item>
-                  <item name="windowNoTitle">true</item>
-                  <item name="android:background">@null</item>
-                  <item name="android:statusBarColor">#0a0a0a</item>
-                  <item name="android:navigationBarColor">#111113</item>
-                  <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
-              </style>
-              <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-                  <item name="android:background">@drawable/splash</item>
-              </style>
-          </resources>
-          EOF
 
-      - name: 8. Build & Sign Release APK
+      - name: 7. Apply App Icon & Dark Status Bar
+        run: |
+          if [ -d "android-res" ]; then
+            cp -r android-res/* android/app/src/main/res/
+          else
+            ICON_SRC=$(find . -maxdepth 2 \( -name "*.webp" -o -name "*.png" -o -name "*.jpg" \) ! -path "./android/*" ! -path "./node_modules/*" | head -n 1)
+            if [ -n "$ICON_SRC" ]; then
+              sudo apt-get update && sudo apt-get install -y imagemagick webp
+              for dir in android/app/src/main/res/mipmap-*dpi; do
+                convert "$ICON_SRC" -resize 192x192 "$dir/ic_launcher.png"
+                convert "$ICON_SRC" -resize 192x192 "$dir/ic_launcher_round.png"
+                convert "$ICON_SRC" -resize 324x324 -gravity center -background white -extent 432x432 "$dir/ic_launcher_foreground.png"
+              done
+            fi
+          fi
+          sed -i 's/Theme.AppCompat.DayNight.NoActionBar/Theme.AppCompat.NoActionBar/g' android/app/src/main/res/values/styles.xml
+
+      - name: 8. Build & Sign APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease assembleDebug
+          ./gradlew assembleDebug assembleRelease
           cd ..
           
           keytool -genkey -v -keystore release.keystore -alias yaser_key -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=Yaser Al-Eizari, OU=Gaming, O=Yaser, L=Sanaa, S=Sanaa, C=YE"
@@ -131,11 +81,12 @@ jobs:
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
           "$BUILD_TOOLS/zipalign" -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
           "$BUILD_TOOLS/apksigner" sign --ks release.keystore --ks-pass pass:123456 --key-pass pass:123456 --out "برا-السالفة-اليمنية.apk" aligned.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk "برا-السالفة-اليمنية-debug.apk"
 
-      - name: 9. Upload Signed APK Artifact
+      - name: 9. Upload Ready APK
         uses: actions/upload-artifact@v4
         with:
           name: Bara-AlSalfa-Yemeni-APK
           path: |
             برا-السالفة-اليمنية.apk
-            android/app/build/outputs/apk/debug/app-debug.apk
+            برا-السالفة-اليمنية-debug.apk
