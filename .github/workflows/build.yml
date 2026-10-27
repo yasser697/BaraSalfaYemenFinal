@@ -12,22 +12,25 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Extract ZIP (If uploaded as ZIP) & Locate HTML
+      - name: 2. Extract ZIP & Prepare HTML File
         run: |
-          if ls *.zip 1> /dev/null 2>&1; then
-            for z in *.zip; do
-              unzip -o "$z"
-            done
-          fi
+          shopt -s nullglob
+          for z in *.zip */*.zip; do
+            echo "Extracting $z..."
+            unzip -o "$z"
+          done
           mkdir -p www
           if [ ! -f "www/index.html" ]; then
-            HTML_FILE=$(find . -maxdepth 2 -name "*.html" ! -path "./www/*" ! -path "./node_modules/*" | head -n 1)
+            HTML_FILE=$(find . -maxdepth 3 -name "*.html" ! -path "./www/*" ! -path "./node_modules/*" ! -path "./android/*" | head -n 1)
             if [ -n "$HTML_FILE" ]; then
               cp "$HTML_FILE" www/index.html
             else
-              echo "Error: HTML file not found!" && exit 1
+              echo "ERROR: No HTML file found in repository!"
+              ls -la
+              exit 1
             fi
           fi
+          ls -la www/index.html
 
       - name: 3. Setup Node.js 20
         uses: actions/setup-node@v4
@@ -40,24 +43,38 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 5. Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 6. Initialize Capacitor & Android Project
+      - name: 5. Initialize Capacitor Android Project
         run: |
-          echo '{"name":"bara-alsalfa-yemeni","version":"1.0.0","dependencies":{"@capacitor/android":"6.1.2","@capacitor/cli":"6.1.2","@capacitor/core":"6.1.2"}}' > package.json
-          echo '{"appId":"com.yaser.barasalfa","appName":"برا السالفة اليمنية","webDir":"www","backgroundColor":"#0a0a0a"}' > capacitor.config.json
+          rm -rf node_modules package-lock.json android
+          cat << 'EOF' > package.json
+          {
+            "name": "bara-alsalfa-yemeni",
+            "version": "1.0.0",
+            "dependencies": {
+              "@capacitor/android": "6.1.2",
+              "@capacitor/cli": "6.1.2",
+              "@capacitor/core": "6.1.2"
+            }
+          }
+          EOF
+          cat << 'EOF' > capacitor.config.json
+          {
+            "appId": "com.yaser.barasalfa",
+            "appName": "برا السالفة اليمنية",
+            "webDir": "www",
+            "backgroundColor": "#0a0a0a"
+          }
+          EOF
           npm install
-          rm -rf android
           npx cap add android
           npx cap sync android
 
-      - name: 7. Apply App Icon & Dark Status Bar
+      - name: 6. Apply App Icons
         run: |
           if [ -d "android-res" ]; then
             cp -r android-res/* android/app/src/main/res/
           else
-            ICON_SRC=$(find . -maxdepth 2 \( -name "*.webp" -o -name "*.png" -o -name "*.jpg" \) ! -path "./android/*" ! -path "./node_modules/*" | head -n 1)
+            ICON_SRC=$(find . -maxdepth 3 \( -name "*.webp" -o -name "*.png" -o -name "*.jpg" \) ! -path "./android/*" ! -path "./node_modules/*" | head -n 1)
             if [ -n "$ICON_SRC" ]; then
               sudo apt-get update && sudo apt-get install -y imagemagick webp
               for dir in android/app/src/main/res/mipmap-*dpi; do
@@ -67,27 +84,32 @@ jobs:
               done
             fi
           fi
-          sed -i 's/Theme.AppCompat.DayNight.NoActionBar/Theme.AppCompat.NoActionBar/g' android/app/src/main/res/values/styles.xml
 
-      - name: 8. Build & Sign APK
+      - name: 7. Build & Sign APK
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug assembleRelease
-          cd ..
-          
           keytool -genkey -v -keystore release.keystore -alias yaser_key -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=Yaser Al-Eizari, OU=Gaming, O=Yaser, L=Sanaa, S=Sanaa, C=YE"
           
-          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
-          "$BUILD_TOOLS/zipalign" -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-          "$BUILD_TOOLS/apksigner" sign --ks release.keystore --ks-pass pass:123456 --key-pass pass:123456 --out "برا-السالفة-اليمنية.apk" aligned.apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk "برا-السالفة-اليمنية-debug.apk"
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug assembleRelease --no-daemon
+          cd ..
+          
+          mkdir -p output-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk "output-apk/برا-السالفة-اليمنية-debug.apk"
+          
+          UNSIGNED_APK=$(find android/app/build/outputs/apk/release -name "*-unsigned.apk" | head -n 1)
+          if [ -n "$UNSIGNED_APK" ]; then
+            ZIPALIGN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -n 1)
+            APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+            "$ZIPALIGN" -v -p 4 "$UNSIGNED_APK" aligned.apk
+            "$APKSIGNER" sign --ks release.keystore --ks-pass pass:123456 --key-pass pass:123456 --out "output-apk/برا-السالفة-اليمنية.apk" aligned.apk
+          else
+            cp android/app/build/outputs/apk/debug/app-debug.apk "output-apk/برا-السالفة-اليمنية.apk"
+          fi
+          ls -la output-apk/
 
-      - name: 9. Upload Ready APK
+      - name: 8. Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Bara-AlSalfa-Yemeni-APK
-          path: |
-            برا-السالفة-اليمنية.apk
-            برا-السالفة-اليمنية-debug.apk
-            
+          path: output-apk/*.apk
