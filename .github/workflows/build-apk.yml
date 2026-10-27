@@ -1,11 +1,10 @@
-name: Build New APK
+name: Build Bara Salfa APK
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'BaraSalfaYemenNew_FIXED_latest_HTML.zip'
-      - '.github/workflows/build-apk.yml'
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -18,29 +17,54 @@ jobs:
       - name: Download repository files
         uses: actions/checkout@v4
 
-      - name: Install Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Extract project
+      - name: Extract the correct project
+        shell: bash
         run: |
-          mkdir source
-          unzip -q BaraSalfaYemenNew_logo_ready.zip -d source
+          ZIP_FILE="$GITHUB_WORKSPACE/BaraSalfaYemenNew_FIXED_latest_HTML.zip"
 
-      - name: Build APK
-        run: gradle -p source assembleDebug
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "::error::Project ZIP not found at: $ZIP_FILE"
+            ls -la "$GITHUB_WORKSPACE"
+            exit 1
+          fi
 
-      - name: Save APK
+          mkdir -p "$GITHUB_WORKSPACE/project"
+
+          unzip -oq "$ZIP_FILE" -d "$GITHUB_WORKSPACE/project"
+
+          SETTINGS_FILE="$GITHUB_WORKSPACE/project/settings.gradle"
+
+          if [ ! -f "$SETTINGS_FILE" ]; then
+            echo "::error::settings.gradle not found in extracted project"
+            find "$GITHUB_WORKSPACE/project" -maxdepth 3 -type f
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/project" >> "$GITHUB_ENV"
+
+      - name: Build Android APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --no-daemon
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: BaraSalfa-debug-APK
-          path: source/app/build/outputs/apk/debug/app-debug.apk
+          path: project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
