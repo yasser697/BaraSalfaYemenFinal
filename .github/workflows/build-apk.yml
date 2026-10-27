@@ -1,0 +1,56 @@
+name: Build Bara Salfa Yemen APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Find and extract Android project
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Android project ZIP was not found."
+            exit 1
+          fi
+
+          mkdir -p /tmp/android-project
+          unzip -q "$ZIP_FILE" -d /tmp/android-project
+
+          PROJECT_DIR="/tmp/android-project/BraAlSalfaYemeniya-Android"
+
+          if [ ! -f "$PROJECT_DIR/settings.gradle" ]; then
+            echo "ERROR: Android project files were not found."
+            find /tmp/android-project -maxdepth 3 -type f
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        working-directory: .
+        run: |
+          cd "$PROJECT_DIR"
+          gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bara-Salfa-Yemen-APK
+          path: /tmp/android-project/BraAlSalfaYemeniya-Android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
